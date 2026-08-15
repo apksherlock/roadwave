@@ -1,0 +1,15 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- A single continuous waveform stroke — the whole mark, no fill, so it
+         also works unmodified as the Android 13+ monochrome themed icon. -->
+    <path
+        android:strokeColor="#FAF9F6"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M22,54 C27,66 33,66 38,54 C43,42 49,42 54,54 C59,66 65,66 70,54 C75,42 81,42 86,54" />
+</vector>
