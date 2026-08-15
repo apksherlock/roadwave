@@ -3,6 +3,7 @@ package com.apksherlock.roadwave.ui.main
 import android.app.Application
 import android.content.ComponentName
 import android.net.Uri
+import androidx.core.net.toUri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -177,7 +178,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun playSong(song: Song, playlist: com.apksherlock.roadwave.model.Playlist? = null) {
         val controller = this.controller ?: return
-        
+
         val songList = if (playlist != null) {
             playlist.songIds.mapNotNull { id -> _songs.value.find { it.id == id } }
         } else {
@@ -187,7 +188,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val mediaItems = songList.map {
             MediaItem.Builder()
                 .setMediaId(it.id)
-                .setUri(Uri.parse(it.mediaPath))
+                .setUri(it.mediaPath.toUri())
                 .setMediaMetadata(
                     androidx.media3.common.MediaMetadata.Builder()
                         .setTitle(it.title)
@@ -199,7 +200,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .build()
         }
         val startIndex = songList.indexOf(song).coerceAtLeast(0)
-        
+
         controller.setMediaItems(mediaItems)
         controller.seekTo(startIndex, 0L)
         controller.prepare()

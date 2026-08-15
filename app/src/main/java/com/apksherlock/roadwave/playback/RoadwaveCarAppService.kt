@@ -1,8 +1,8 @@
 package com.apksherlock.roadwave.playback
 
 import android.content.ComponentName
-import android.util.Log
 import android.support.v4.media.session.MediaSessionCompat
+import android.util.Log
 import androidx.car.app.CarAppService
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
@@ -36,6 +36,7 @@ const val MEDIA_PLAYBACK_TEMPLATE_API_LEVEL = 8
 const val CAR_LOG_TAG = "RoadwaveCar"
 
 class RoadwaveCarAppService : CarAppService() {
+    @Suppress("PrivateResource") // deliberate: see the allowlist branch below
     override fun createHostValidator(): HostValidator {
         // ALLOW_ALL_HOSTS_VALIDATOR only satisfies a real host's binding check when the
         // app is debuggable — a production Android Auto host (a real car) refuses to bind
@@ -67,19 +68,21 @@ class RoadwaveCarSession : Session() {
     private var tokenControllerFuture: ListenableFuture<MediaController>? = null
 
     init {
-        lifecycle.addObserver(LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_CREATE -> {
-                    logHostDiagnostics()
-                    registerPlaybackToken()
+        lifecycle.addObserver(
+            LifecycleEventObserver { _, event ->
+                when (event) {
+                    Lifecycle.Event.ON_CREATE -> {
+                        logHostDiagnostics()
+                        registerPlaybackToken()
+                    }
+                    Lifecycle.Event.ON_DESTROY -> {
+                        tokenControllerFuture?.let { MediaController.releaseFuture(it) }
+                        tokenControllerFuture = null
+                    }
+                    else -> Unit
                 }
-                Lifecycle.Event.ON_DESTROY -> {
-                    tokenControllerFuture?.let { MediaController.releaseFuture(it) }
-                    tokenControllerFuture = null
-                }
-                else -> Unit
             }
-        })
+        )
     }
 
     /**
@@ -187,9 +190,10 @@ class RoadwaveCarSession : Session() {
 
     private fun handlePlaybackIntent(intent: android.content.Intent) {
         val action = intent.action
-        if (action == "androidx.car.app.media.action.SHOW_MEDIA_PLAYBACK" || 
+        if (action == "androidx.car.app.media.action.SHOW_MEDIA_PLAYBACK" ||
             action == "android.intent.action.VIEW" ||
-            action == "android.media.action.DISPLAY_AUDIO_CONTROL") {
+            action == "android.media.action.DISPLAY_AUDIO_CONTROL"
+        ) {
             val screenManager = carContext.getCarService(ScreenManager::class.java)
             if (screenManager.top !is PlaybackScreen) {
                 screenManager.push(PlaybackScreen(carContext))
@@ -232,7 +236,7 @@ class SongsScreen(carContext: CarContext) : Screen(carContext) {
     init {
         val sessionToken = SessionToken(carContext, ComponentName(carContext, PlaybackService::class.java))
         controllerFuture = MediaController.Builder(carContext, sessionToken).buildAsync()
-        
+
         scope.launch {
             songs = repository.getSongs()
             invalidate()
@@ -249,7 +253,7 @@ class SongsScreen(carContext: CarContext) : Screen(carContext) {
                     Row.Builder()
                         .setTitle(song.title)
                         .addText(song.artist)
-                        .setOnClickListener { 
+                        .setOnClickListener {
                             playMediaItem(index)
                             screenManager.push(PlaybackScreen(carContext))
                         }
@@ -301,7 +305,7 @@ class PlaylistsScreen(carContext: CarContext) : Screen(carContext) {
                     Row.Builder()
                         .setTitle(playlist.name)
                         .addText("${playlist.songIds.size} songs")
-                        .setOnClickListener { 
+                        .setOnClickListener {
                             screenManager.push(PlaylistDetailScreen(carContext, playlist))
                         }
                         .build()
@@ -316,7 +320,9 @@ class PlaylistsScreen(carContext: CarContext) : Screen(carContext) {
     }
 }
 
-class PlaylistDetailScreen(carContext: CarContext, private val playlist: com.apksherlock.roadwave.model.Playlist) : Screen(carContext) {
+class PlaylistDetailScreen(carContext: CarContext, private val playlist: com.apksherlock.roadwave.model.Playlist) : Screen(
+    carContext
+) {
     private val repository = SongRepository(carContext)
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var playlistSongs: List<com.apksherlock.roadwave.model.Song> = emptyList()
@@ -343,7 +349,7 @@ class PlaylistDetailScreen(carContext: CarContext, private val playlist: com.apk
                     Row.Builder()
                         .setTitle(song.title)
                         .addText(song.artist)
-                        .setOnClickListener { 
+                        .setOnClickListener {
                             playMediaItem(index)
                             screenManager.push(PlaybackScreen(carContext))
                         }
@@ -429,13 +435,15 @@ class PlaybackScreen(carContext: CarContext) : Screen(carContext) {
             }, MoreExecutors.directExecutor())
         }
 
-        lifecycle.addObserver(LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_DESTROY) {
-                controllerFuture?.let { MediaController.releaseFuture(it) }
-                controllerFuture = null
-                controller = null
+        lifecycle.addObserver(
+            LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_DESTROY) {
+                    controllerFuture?.let { MediaController.releaseFuture(it) }
+                    controllerFuture = null
+                    controller = null
+                }
             }
-        })
+        )
     }
 
     @androidx.annotation.OptIn(ExperimentalCarApi::class)

@@ -24,7 +24,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.LibraryMusic
-import androidx.media3.common.Player
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -43,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.Player
 import com.apksherlock.roadwave.model.Playlist
 import com.apksherlock.roadwave.model.Song
 import com.apksherlock.roadwave.ui.main.MainViewModel
@@ -283,8 +283,7 @@ fun MainScreen(viewModel: MainViewModel) {
                 }
             }
         }
-    )
-{ innerPadding ->
+    ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding)) {
             when (selectedTab) {
                 0 -> SongsList(
@@ -397,12 +396,18 @@ fun CustomSongCard(
                 .size(34.dp)
                 .clip(CircleShape)
                 .background(
-                    if (isPlaying) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.surfaceVariant
+                    if (isPlaying) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    }
                 )
                 .then(
-                    if (!isPlaying) Modifier.border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                    else Modifier
+                    if (!isPlaying) {
+                        Modifier.border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                    } else {
+                        Modifier
+                    }
                 ),
             contentAlignment = Alignment.Center
         ) {
@@ -443,7 +448,10 @@ fun CustomSongCard(
             ) {
                 DropdownMenuItem(
                     text = { Text(deleteLabel, color = MaterialTheme.colorScheme.error) },
-                    onClick = { onDeleteSong(); showMenu = false },
+                    onClick = {
+                        onDeleteSong()
+                        showMenu = false
+                    },
                     leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) }
                 )
                 if (playlists.isNotEmpty()) {
@@ -451,7 +459,10 @@ fun CustomSongCard(
                     playlists.forEach { playlist ->
                         DropdownMenuItem(
                             text = { Text("Add to ${playlist.name}") },
-                            onClick = { onAddToPlaylist(playlist); showMenu = false }
+                            onClick = {
+                                onAddToPlaylist(playlist)
+                                showMenu = false
+                            }
                         )
                     }
                 }
@@ -559,7 +570,10 @@ fun MinimalProgressBar(
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragStart = { offset -> dragProgress = (offset.x / size.width).coerceIn(0f, 1f) },
-                    onDragEnd = { dragProgress?.let(onSeek); dragProgress = null },
+                    onDragEnd = {
+                        dragProgress?.let(onSeek)
+                        dragProgress = null
+                    },
                     onDragCancel = { dragProgress = null }
                 ) { change, _ -> dragProgress = (change.position.x / size.width).coerceIn(0f, 1f) }
             }
@@ -635,8 +649,11 @@ fun MiniPlayer(
                 Icon(
                     icon,
                     null,
-                    tint = if (repeatMode == Player.REPEAT_MODE_ONE) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = if (repeatMode == Player.REPEAT_MODE_ONE) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
                 )
             }
             IconButton(onClick = onSkipPrevious, modifier = Modifier.size(32.dp)) {
@@ -700,6 +717,7 @@ fun AddSongsToPlaylistDialog(
         }
     )
 }
+
 @Composable
 fun AddPlaylistDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var name by remember { mutableStateOf("") }

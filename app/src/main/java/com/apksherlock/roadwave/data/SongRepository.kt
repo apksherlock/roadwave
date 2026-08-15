@@ -36,9 +36,11 @@ class SongRepository(private val context: Context) {
         }
     }
 
-    suspend fun addSong(uri: Uri, title: String, artist: String, duration: Long): Result<Song> = withContext(Dispatchers.IO) {
+    suspend fun addSong(uri: Uri, title: String, artist: String, duration: Long): Result<Song> = withContext(
+        Dispatchers.IO
+    ) {
         val currentSongs = getSongs().toMutableList()
-        
+
         // Check for duplicates based on title
         if (currentSongs.any { it.title.equals(title, ignoreCase = true) }) {
             return@withContext Result.failure(Exception("Song already exists: $title"))
@@ -84,7 +86,9 @@ class SongRepository(private val context: Context) {
                 } else {
                     it.copy(songIds = it.songIds + songId)
                 }
-            } else it
+            } else {
+                it
+            }
         }
         playlistsFile.writeText(Json.encodeToString(playlists))
     }
@@ -93,7 +97,9 @@ class SongRepository(private val context: Context) {
         val playlists = getPlaylists().map {
             if (it.id == playlistId) {
                 it.copy(songIds = it.songIds.filter { id -> id != songId })
-            } else it
+            } else {
+                it
+            }
         }
         playlistsFile.writeText(Json.encodeToString(playlists))
     }
@@ -108,7 +114,7 @@ class SongRepository(private val context: Context) {
         val currentSongs = getSongs().toMutableList()
         currentSongs.removeIf { it.id == song.id }
         songsFile.writeText(Json.encodeToString(currentSongs))
-        
+
         // Also remove from all playlists
         val currentPlaylists = getPlaylists().map { playlist ->
             playlist.copy(songIds = playlist.songIds.filter { it != song.id })

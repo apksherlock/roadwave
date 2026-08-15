@@ -8,6 +8,14 @@
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="androidx.car.app.MEDIA_TEMPLATES" />
 
+    <!--
+      Both services below are exported with no permission requirement on purpose:
+      PlaybackService must be bindable by any media browser client (Android Auto,
+      Bluetooth, Assistant), and RoadwaveCarAppService must be bindable by any Car
+      App Library host. Locking either down with a permission would break exactly
+      the discoverability they exist for. Trust is enforced at the app layer
+      instead (see RoadwaveCarAppService#createHostValidator).
+    -->
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -22,11 +30,13 @@
             android:name=".playback.PlaybackService"
             android:enabled="true"
             android:exported="true"
-            android:foregroundServiceType="mediaPlayback">
+            android:foregroundServiceType="mediaPlayback"
+            tools:ignore="ExportedService">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaLibraryService" />
                 <action android:name="android.media.browse.MediaBrowserService" />
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
+                <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
             </intent-filter>
         </service>
 
@@ -68,7 +78,8 @@
         <service
             android:name=".playback.RoadwaveCarAppService"
             android:exported="true"
-            android:label="@string/app_name">
+            android:label="@string/app_name"
+            tools:ignore="ExportedService">
             <intent-filter>
                 <action android:name="androidx.car.app.CarAppService" />
                 <action android:name="androidx.car.app.media.action.SHOW_MEDIA_PLAYBACK" />
@@ -79,7 +90,6 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="@string/app_name"
             android:theme="@style/Theme.Roadwave"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>

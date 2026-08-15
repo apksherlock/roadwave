@@ -1,0 +1,12 @@
+# Overrides on top of detekt's bundled default config (buildUponDefaultConfig = true).
+# Kept minimal: only the two rules that are near-unusable as-is in a Compose codebase.
+
+naming:
+  FunctionNaming:
+    # Composable functions are PascalCase by convention, not camelCase.
+    ignoreAnnotated: ['Composable']
+
+style:
+  MagicNumber:
+    # dp/sp/color literals are the normal way to write Compose UI code.
+    active: false

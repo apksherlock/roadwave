@@ -1,0 +1,49 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:MainActivity.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable fun MainScreen(viewModel: MainViewModel)</ID>
+    <ID>LongMethod:MainActivity.kt$@Composable fun CustomSongCard( song: Song, playlists: List&lt;Playlist&gt;, isPlaying: Boolean, onClick: () -&gt; Unit, onAddToPlaylist: (Playlist) -&gt; Unit, onDeleteSong: () -&gt; Unit, deleteLabel: String = "Delete from Device" )</ID>
+    <ID>LongMethod:MainActivity.kt$@Composable fun MiniPlayer( song: Song, isPlaying: Boolean, playbackPosition: Long, duration: Long, repeatMode: Int, onTogglePlay: () -&gt; Unit, onSkipNext: () -&gt; Unit, onSkipPrevious: () -&gt; Unit, onSeek: (Long) -&gt; Unit, onToggleRepeat: () -&gt; Unit )</ID>
+    <ID>LongMethod:MainActivity.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable fun MainScreen(viewModel: MainViewModel)</ID>
+    <ID>LongMethod:PlaybackService.kt$PlaybackService.LibraryCallback$override fun onGetChildren( session: MediaLibrarySession, browser: MediaSession.ControllerInfo, parentId: String, page: Int, pageSize: Int, params: LibraryParams? ): ListenableFuture&lt;LibraryResult&lt;ImmutableList&lt;MediaItem&gt;&gt;&gt;</ID>
+    <ID>LongMethod:RoadwaveCarAppService.kt$PlaybackScreen$private fun buildFallbackTemplate(): Template</ID>
+    <ID>LongParameterList:MainActivity.kt$( song: Song, isPlaying: Boolean, playbackPosition: Long, duration: Long, repeatMode: Int, onTogglePlay: () -&gt; Unit, onSkipNext: () -&gt; Unit, onSkipPrevious: () -&gt; Unit, onSeek: (Long) -&gt; Unit, onToggleRepeat: () -&gt; Unit )</ID>
+    <ID>LongParameterList:MainActivity.kt$( song: Song, playlists: List&lt;Playlist&gt;, isPlaying: Boolean, onClick: () -&gt; Unit, onAddToPlaylist: (Playlist) -&gt; Unit, onDeleteSong: () -&gt; Unit, deleteLabel: String = "Delete from Device" )</ID>
+    <ID>LongParameterList:MainActivity.kt$( songs: List&lt;Song&gt;, playlists: List&lt;Playlist&gt;, currentSongId: String?, onSongClick: (Song) -&gt; Unit, onAddToPlaylist: (Song, Playlist) -&gt; Unit, onDeleteSong: (Song) -&gt; Unit )</ID>
+    <ID>MaxLineLength:MainActivity.kt$color = if (isPlaying) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant</ID>
+    <ID>MaxLineLength:MainViewModel.kt$MainViewModel$private val controller: MediaController? get() = if (controllerFuture?.isDone == true) controllerFuture?.get() else null</ID>
+    <ID>MaxLineLength:PlaybackService.kt$PlaybackService.LibraryCallback$"android.resource://com.apksherlock.roadwave/drawable/art_placeholder".toUri()</ID>
+    <ID>MaxLineLength:PlaybackService.kt$PlaybackService.LibraryCallback$.</ID>
+    <ID>MaxLineLength:RoadwaveCarAppService.kt$PlaylistDetailScreen$class</ID>
+    <ID>MaxLineLength:RoadwaveCarAppService.kt$RoadwaveCarSession$"Host is below level $MEDIA_PLAYBACK_TEMPLATE_API_LEVEL — PlaybackScreen will use the ListTemplate fallback."</ID>
+    <ID>MaximumLineLength:MainActivity.kt$ </ID>
+    <ID>MaximumLineLength:MainViewModel.kt$MainViewModel$ </ID>
+    <ID>MaximumLineLength:PlaybackService.kt$PlaybackService.LibraryCallback$ </ID>
+    <ID>MaximumLineLength:RoadwaveCarAppService.kt$PlaylistDetailScreen$class</ID>
+    <ID>MaximumLineLength:RoadwaveCarAppService.kt$RoadwaveCarSession$ </ID>
+    <ID>NestedBlockDepth:MainActivity.kt$fun Uri.getFileName(context: Context): String</ID>
+    <ID>NoWildcardImports:ExampleUnitTest.kt$import org.junit.Assert.*</ID>
+    <ID>NoWildcardImports:MainActivity.kt$import androidx.compose.animation.core.*</ID>
+    <ID>NoWildcardImports:MainActivity.kt$import androidx.compose.foundation.layout.*</ID>
+    <ID>NoWildcardImports:MainActivity.kt$import androidx.compose.material.icons.filled.*</ID>
+    <ID>NoWildcardImports:MainActivity.kt$import androidx.compose.material3.*</ID>
+    <ID>NoWildcardImports:MainActivity.kt$import androidx.compose.runtime.*</ID>
+    <ID>NoWildcardImports:MainActivity.kt$import com.apksherlock.roadwave.ui.theme.*</ID>
+    <ID>NoWildcardImports:PlaybackService.kt$import kotlinx.coroutines.*</ID>
+    <ID>NoWildcardImports:RoadwaveCarAppService.kt$import androidx.car.app.model.*</ID>
+    <ID>SwallowedException:SongRepository.kt$SongRepository$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SongRepository.kt$SongRepository$e: Exception</ID>
+    <ID>TooManyFunctions:MainActivity.kt$com.apksherlock.roadwave.MainActivity.kt</ID>
+    <ID>TooManyFunctions:MainViewModel.kt$MainViewModel : AndroidViewModel</ID>
+    <ID>WildcardImport:ExampleUnitTest.kt$import org.junit.Assert.*</ID>
+    <ID>WildcardImport:MainActivity.kt$import androidx.compose.animation.core.*</ID>
+    <ID>WildcardImport:MainActivity.kt$import androidx.compose.foundation.layout.*</ID>
+    <ID>WildcardImport:MainActivity.kt$import androidx.compose.material.icons.filled.*</ID>
+    <ID>WildcardImport:MainActivity.kt$import androidx.compose.material3.*</ID>
+    <ID>WildcardImport:MainActivity.kt$import androidx.compose.runtime.*</ID>
+    <ID>WildcardImport:MainActivity.kt$import com.apksherlock.roadwave.ui.theme.*</ID>
+    <ID>WildcardImport:PlaybackService.kt$import kotlinx.coroutines.*</ID>
+    <ID>WildcardImport:RoadwaveCarAppService.kt$import androidx.car.app.model.*</ID>
+  </CurrentIssues>
+</SmellBaseline>

@@ -5,7 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.support.v4.media.session.MediaSessionCompat
-import java.io.File
+import androidx.core.net.toUri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
@@ -27,6 +27,7 @@ import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.*
+import java.io.File
 
 class PlaybackService : MediaLibraryService() {
 
@@ -35,7 +36,6 @@ class PlaybackService : MediaLibraryService() {
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val repeatCommand = SessionCommand("ACTION_REPEAT", Bundle.EMPTY)
-
 
     companion object {
         var mediaSessionToken: MediaSessionCompat.Token? = null
@@ -231,7 +231,9 @@ class PlaybackService : MediaLibraryService() {
                                 .setArtist(song.artist)
                                 .setIsBrowsable(false)
                                 .setIsPlayable(true)
-                                .setArtworkUri(Uri.parse("android.resource://com.apksherlock.roadwave/drawable/art_placeholder"))
+                                .setArtworkUri(
+                                    "android.resource://com.apksherlock.roadwave/drawable/art_placeholder".toUri()
+                                )
                                 .build()
                         )
                         .build()
@@ -288,7 +290,9 @@ class PlaybackService : MediaLibraryService() {
                                         .setIsPlayable(true)
                                         .setTitle(song.title)
                                         .setArtist(song.artist)
-                                        .setArtworkUri(Uri.parse("android.resource://com.apksherlock.roadwave/drawable/art_placeholder"))
+                                        .setArtworkUri(
+                                            "android.resource://com.apksherlock.roadwave/drawable/art_placeholder".toUri()
+                                        )
                                         .build()
                                 )
                                 .build()
@@ -324,7 +328,7 @@ class PlaybackService : MediaLibraryService() {
                                                 .setIsPlayable(true)
                                                 .setTitle(song.title)
                                                 .setArtist(song.artist)
-                                                .setArtworkUri(Uri.parse("android.resource://com.apksherlock.roadwave/drawable/art_placeholder"))
+                                                .setArtworkUri("android.resource://com.apksherlock.roadwave/drawable/art_placeholder".toUri())
                                                 .build()
                                         )
                                         .build()
@@ -367,7 +371,9 @@ class PlaybackService : MediaLibraryService() {
             deferred.invokeOnCompletion { executor.execute(listener) }
         }
 
-        override fun cancel(mayInterruptIfRunning: Boolean): Boolean = deferred.completeExceptionally(java.util.concurrent.CancellationException())
+        override fun cancel(mayInterruptIfRunning: Boolean): Boolean = deferred.completeExceptionally(
+            java.util.concurrent.CancellationException()
+        )
         override fun isCancelled(): Boolean = deferred.isCancelled
         override fun isDone(): Boolean = deferred.isCompleted
         override fun get(): V = runBlocking { deferred.await() }
