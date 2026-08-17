@@ -218,11 +218,88 @@ class MainCarScreen(carContext: CarContext) : Screen(carContext) {
                     .setOnClickListener { screenManager.push(PlaylistsScreen(carContext)) }
                     .build()
             )
+            .addItem(
+                Row.Builder()
+                    .setTitle("Search")
+                    .addText("Find a song")
+                    .setOnClickListener { screenManager.push(SearchScreen(carContext)) }
+                    .build()
+            )
 
         return ListTemplate.Builder()
             .setSingleList(listBuilder.build())
             .setHeader(Header.Builder().setTitle("Roadwave").setStartHeaderAction(Action.APP_ICON).build())
             .build()
+    }
+}
+
+class SearchScreen(carContext: CarContext) : Screen(carContext), SearchTemplate.SearchCallback {
+    private val repository = SongRepository(carContext)
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var allSongs: List<com.apksherlock.roadwave.model.Song> = emptyList()
+    private var results: List<com.apksherlock.roadwave.model.Song> = emptyList()
+    private var controllerFuture: ListenableFuture<MediaController>? = null
+
+    init {
+        val sessionToken = SessionToken(carContext, ComponentName(carContext, PlaybackService::class.java))
+        controllerFuture = MediaController.Builder(carContext, sessionToken).buildAsync()
+
+        scope.launch {
+            allSongs = repository.getSongs()
+        }
+    }
+
+    override fun onSearchTextChanged(searchText: String) {
+        results = if (searchText.isBlank()) {
+            emptyList()
+        } else {
+            allSongs.filter {
+                it.title.contains(searchText, ignoreCase = true) ||
+                    it.artist.contains(searchText, ignoreCase = true)
+            }
+        }
+        invalidate()
+    }
+
+    override fun onGetTemplate(): Template {
+        val listBuilder = ItemList.Builder()
+        if (results.isEmpty()) {
+            listBuilder.addItem(Row.Builder().setTitle("No matches").build())
+        } else {
+            results.forEachIndexed { index, song ->
+                listBuilder.addItem(
+                    Row.Builder()
+                        .setTitle(song.title)
+                        .addText(song.artist)
+                        .setOnClickListener {
+                            playMediaItem(index)
+                            screenManager.push(PlaybackScreen(carContext))
+                        }
+                        .build()
+                )
+            }
+        }
+
+        return SearchTemplate.Builder(this)
+            .setHeaderAction(Action.BACK)
+            .setSearchHint("Search songs")
+            .setShowKeyboardByDefault(true)
+            .setItemList(listBuilder.build())
+            .build()
+    }
+
+    private fun playMediaItem(startIndex: Int) {
+        controllerFuture?.addListener({
+            val controller = controllerFuture?.get()
+            val mediaItems = results.map { song ->
+                androidx.media3.common.MediaItem.Builder()
+                    .setMediaId(song.id)
+                    .build()
+            }
+            controller?.setMediaItems(mediaItems, startIndex, 0L)
+            controller?.prepare()
+            controller?.play()
+        }, MoreExecutors.directExecutor())
     }
 }
 

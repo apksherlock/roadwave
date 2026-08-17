@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.LibraryMusic
@@ -30,9 +31,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -145,6 +149,8 @@ fun MainScreen(viewModel: MainViewModel) {
 
     var selectedPlaylist by remember { mutableStateOf<Playlist?>(null) }
     var selectedTab by remember { mutableIntStateOf(0) }
+    var isSearchActive by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
     var showAddPlaylistDialog by remember { mutableStateOf(false) }
     var showAddSongsToPlaylistDialog by remember { mutableStateOf(false) }
 
@@ -188,12 +194,54 @@ fun MainScreen(viewModel: MainViewModel) {
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        headerTitle,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 22.sp,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
+                    if (isSearchActive) {
+                        val focusRequester = remember { FocusRequester() }
+                        LaunchedEffect(Unit) { focusRequester.requestFocus() }
+                        BasicTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            modifier = Modifier.focusRequester(focusRequester),
+                            singleLine = true,
+                            textStyle = LocalTextStyle.current.copy(
+                                color = MaterialTheme.colorScheme.onBackground,
+                                fontSize = 18.sp
+                            ),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.onBackground),
+                            decorationBox = { innerField ->
+                                if (searchQuery.isEmpty()) {
+                                    Text(
+                                        "Search songs",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 18.sp
+                                    )
+                                }
+                                innerField()
+                            }
+                        )
+                    } else {
+                        Text(
+                            headerTitle,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 22.sp,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
+                },
+                actions = {
+                    if (selectedTab == 0) {
+                        IconButton(
+                            onClick = {
+                                if (isSearchActive) searchQuery = ""
+                                isSearchActive = !isSearchActive
+                            }
+                        ) {
+                            Icon(
+                                if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
+                                contentDescription = if (isSearchActive) "Close search" else "Search songs",
+                                tint = MaterialTheme.colorScheme.onBackground
+                            )
+                        }
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
@@ -269,6 +317,8 @@ fun MainScreen(viewModel: MainViewModel) {
                         onClick = {
                             selectedTab = 1
                             selectedPlaylist = null
+                            isSearchActive = false
+                            searchQuery = ""
                         },
                         icon = { Icon(Icons.Outlined.LibraryMusic, null) },
                         label = { Text("Playlists") },
@@ -290,6 +340,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     songs = songs,
                     playlists = playlists,
                     currentSongId = currentSong?.id,
+                    query = searchQuery,
                     onSongClick = { viewModel.playSong(it) },
                     onAddToPlaylist = { s, p -> viewModel.addSongToPlaylist(s, p) },
                     onDeleteSong = { viewModel.deleteSongGlobally(it) }
@@ -344,20 +395,32 @@ fun SongsList(
     songs: List<Song>,
     playlists: List<Playlist>,
     currentSongId: String?,
+    query: String,
     onSongClick: (Song) -> Unit,
     onAddToPlaylist: (Song, Playlist) -> Unit,
     onDeleteSong: (Song) -> Unit
 ) {
-    if (songs.isEmpty()) {
+    val filteredSongs = remember(songs, query) {
+        if (query.isBlank()) {
+            songs
+        } else {
+            songs.filter { it.title.contains(query, ignoreCase = true) || it.artist.contains(query, ignoreCase = true) }
+        }
+    }
+
+    if (filteredSongs.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No songs yet. Add some music!", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                if (songs.isEmpty()) "No songs yet. Add some music!" else "No matches",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     } else {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 20.dp)
         ) {
-            items(songs) { song ->
+            items(filteredSongs) { song ->
                 CustomSongCard(
                     song = song,
                     playlists = playlists,

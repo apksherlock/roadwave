@@ -10,7 +10,7 @@
     <ID>LongMethod:RoadwaveCarAppService.kt$PlaybackScreen$private fun buildFallbackTemplate(): Template</ID>
     <ID>LongParameterList:MainActivity.kt$( song: Song, isPlaying: Boolean, playbackPosition: Long, duration: Long, repeatMode: Int, onTogglePlay: () -&gt; Unit, onSkipNext: () -&gt; Unit, onSkipPrevious: () -&gt; Unit, onSeek: (Long) -&gt; Unit, onToggleRepeat: () -&gt; Unit )</ID>
     <ID>LongParameterList:MainActivity.kt$( song: Song, playlists: List&lt;Playlist&gt;, isPlaying: Boolean, onClick: () -&gt; Unit, onAddToPlaylist: (Playlist) -&gt; Unit, onDeleteSong: () -&gt; Unit, deleteLabel: String = "Delete from Device" )</ID>
-    <ID>LongParameterList:MainActivity.kt$( songs: List&lt;Song&gt;, playlists: List&lt;Playlist&gt;, currentSongId: String?, onSongClick: (Song) -&gt; Unit, onAddToPlaylist: (Song, Playlist) -&gt; Unit, onDeleteSong: (Song) -&gt; Unit )</ID>
+    <ID>LongParameterList:MainActivity.kt$( songs: List&lt;Song&gt;, playlists: List&lt;Playlist&gt;, currentSongId: String?, query: String, onSongClick: (Song) -&gt; Unit, onAddToPlaylist: (Song, Playlist) -&gt; Unit, onDeleteSong: (Song) -&gt; Unit )</ID>
     <ID>MaxLineLength:MainActivity.kt$color = if (isPlaying) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant</ID>
     <ID>MaxLineLength:MainViewModel.kt$MainViewModel$private val controller: MediaController? get() = if (controllerFuture?.isDone == true) controllerFuture?.get() else null</ID>
     <ID>MaxLineLength:PlaybackService.kt$PlaybackService.LibraryCallback$"android.resource://com.apksherlock.roadwave/drawable/art_placeholder".toUri()</ID>
