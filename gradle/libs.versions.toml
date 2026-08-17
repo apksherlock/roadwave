@@ -15,6 +15,7 @@ carApp = "1.7.0"
 media = "1.7.0"
 detekt = "1.23.8"
 composeDetektRules = "0.5.7"
+bugfender = "4.0.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -42,6 +43,7 @@ androidx-media = { group = "androidx.media", name = "media", version.ref = "medi
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 compose-detekt-rules = { group = "io.nlopez.compose.rules", name = "detekt", version.ref = "composeDetektRules" }
 detekt-formatting = { group = "io.gitlab.arturbosch.detekt", name = "detekt-formatting", version.ref = "detekt" }
+bugfender = { group = "com.bugfender.sdk", name = "android", version.ref = "bugfender" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

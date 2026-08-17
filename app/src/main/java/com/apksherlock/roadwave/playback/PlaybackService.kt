@@ -1,10 +1,17 @@
 package com.apksherlock.roadwave.playback
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.support.v4.media.session.MediaSessionCompat
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.core.net.toUri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.ForwardingPlayer
@@ -39,12 +46,59 @@ class PlaybackService : MediaLibraryService() {
 
     companion object {
         var mediaSessionToken: MediaSessionCompat.Token? = null
+        private const val NOTIFICATION_CHANNEL_ID = "roadwave_playback"
+        private const val NOTIFICATION_ID = 1
+    }
+
+    /**
+     * Promotes this service to foreground before any song is playing, not just once
+     * playback starts. Android Auto binds this service during session negotiation —
+     * before the user has picked a track — and without foreground-service protection
+     * during that window, OEM background-process management can evict the process
+     * under memory pressure regardless of battery-optimization settings, causing the
+     * connection to time out. This mirrors how other car-integrated apps (e.g. Waze's
+     * CarAppService, which declares foregroundServiceType="location") stay alive.
+     *
+     * Wrapped defensively: Android 12+ can refuse a foreground-service start from a
+     * background trigger. If that happens here, the service simply continues without
+     * the extra protection rather than crashing onCreate().
+     */
+    private fun promoteToForegroundImmediately() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                "Playback",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+
+        val notification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText("Ready")
+            .setSmallIcon(R.drawable.ic_attribution)
+            .setOngoing(true)
+            .build()
+
+        try {
+            ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            )
+            carLogD("PlaybackService promoted to foreground in onCreate()")
+        } catch (e: IllegalStateException) {
+            carLogE("startForeground() was not allowed at this time", e)
+        }
     }
 
     @androidx.annotation.OptIn(UnstableApi::class)
     @OptIn(UnstableApi::class)
     override fun onCreate() {
+        val start = SystemClock.elapsedRealtime()
         super.onCreate()
+        promoteToForegroundImmediately()
         repository = SongRepository(this)
         val exoPlayer = ExoPlayer.Builder(this)
             .setAudioAttributes(AudioAttributes.DEFAULT, true)
@@ -118,29 +172,26 @@ class PlaybackService : MediaLibraryService() {
 
         mediaSessionToken = mediaSession?.getSessionCompatToken()
         updateRepeatButton()
+        carLogD("PlaybackService.onCreate() done in ${SystemClock.elapsedRealtime() - start}ms")
     }
 
     @androidx.annotation.OptIn(UnstableApi::class)
     @OptIn(UnstableApi::class)
     private fun updateRepeatButton() {
         val player = mediaSession?.player ?: return
+        val isRepeatOne = player.repeatMode == Player.REPEAT_MODE_ONE
 
-        val repeatButton = CommandButton.Builder()
+        // CommandButton.Builder() + setIconResId(customVectorRes) asks the host (Android
+        // Auto) to resolve and rasterize our own vector drawable across process boundaries,
+        // which isn't reliable — it showed up in the car as a generic fallback glyph
+        // instead of the actual icon. CommandButton's built-in ICON_REPEAT_ALL/ONE
+        // constants use the host's own native, correctly-themed icon assets instead, so
+        // there's nothing to cross-process-load in the first place.
+        val repeatButton = CommandButton.Builder(
+            if (isRepeatOne) CommandButton.ICON_REPEAT_ONE else CommandButton.ICON_REPEAT_ALL
+        )
             .setSessionCommand(repeatCommand)
-            .setIconResId(
-                if (player.repeatMode == Player.REPEAT_MODE_ONE) {
-                    R.drawable.ic_repeat_one
-                } else {
-                    R.drawable.ic_repeat
-                }
-            )
-            .setDisplayName(
-                if (player.repeatMode == Player.REPEAT_MODE_ONE) {
-                    "Repeat Track"
-                } else {
-                    "Repeat List"
-                }
-            )
+            .setDisplayName(if (isRepeatOne) "Repeat Track" else "Repeat List")
             .setEnabled(true)
             .build()
 
@@ -220,28 +271,40 @@ class PlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
             mediaItems: MutableList<MediaItem>
         ): ListenableFuture<MutableList<MediaItem>> {
-            val updatedItems = mediaItems.map { item ->
-                val song = runBlocking { repository.getSongs().find { it.id == item.mediaId } }
-                if (song != null) {
-                    item.buildUpon()
-                        .setUri(Uri.fromFile(File(song.mediaPath)))
-                        .setMediaMetadata(
-                            MediaMetadata.Builder()
-                                .setTitle(song.title)
-                                .setArtist(song.artist)
-                                .setIsBrowsable(false)
-                                .setIsPlayable(true)
-                                .setArtworkUri(
-                                    "android.resource://com.apksherlock.roadwave/drawable/art_placeholder".toUri()
-                                )
-                                .build()
-                        )
-                        .build()
-                } else {
-                    item
-                }
-            }.toMutableList()
-            return Futures.immediateFuture(updatedItems)
+            val start = SystemClock.elapsedRealtime()
+            carLogD("onAddMediaItems: resolving ${mediaItems.size} item(s)")
+            val future = SettableFuture<MutableList<MediaItem>>()
+            serviceScope.launch {
+                // One getSongs() call for the whole batch, not one per item — the previous
+                // per-item runBlocking() call synchronously stalled the session callback
+                // thread once per track, which is cheap on a fast device and potentially
+                // very much not on constrained real head-unit hardware.
+                val songs = repository.getSongs()
+                val updatedItems = mediaItems.map { item ->
+                    val song = songs.find { it.id == item.mediaId }
+                    if (song != null) {
+                        item.buildUpon()
+                            .setUri(Uri.fromFile(File(song.mediaPath)))
+                            .setMediaMetadata(
+                                MediaMetadata.Builder()
+                                    .setTitle(song.title)
+                                    .setArtist(song.artist)
+                                    .setIsBrowsable(false)
+                                    .setIsPlayable(true)
+                                    .setArtworkUri(
+                                        "android.resource://com.apksherlock.roadwave/drawable/art_placeholder".toUri()
+                                    )
+                                    .build()
+                            )
+                            .build()
+                    } else {
+                        item
+                    }
+                }.toMutableList()
+                carLogD("onAddMediaItems: resolved in ${SystemClock.elapsedRealtime() - start}ms")
+                future.set(updatedItems)
+            }
+            return future
         }
 
         override fun onGetChildren(
@@ -252,6 +315,8 @@ class PlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+            val start = SystemClock.elapsedRealtime()
+            carLogD("onGetChildren: parentId=$parentId")
             val future = SettableFuture<LibraryResult<ImmutableList<MediaItem>>>()
             serviceScope.launch {
                 val mediaItems = when (parentId) {
@@ -339,6 +404,10 @@ class PlaybackService : MediaLibraryService() {
                         }
                     }
                 }
+                carLogD(
+                    "onGetChildren: parentId=$parentId resolved ${mediaItems.size} item(s) in " +
+                        "${SystemClock.elapsedRealtime() - start}ms"
+                )
                 future.set(LibraryResult.ofItemList(mediaItems, params))
             }
             return future

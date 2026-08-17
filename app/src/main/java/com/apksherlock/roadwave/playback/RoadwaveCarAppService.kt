@@ -1,8 +1,8 @@
 package com.apksherlock.roadwave.playback
 
 import android.content.ComponentName
+import android.os.SystemClock
 import android.support.v4.media.session.MediaSessionCompat
-import android.util.Log
 import androidx.car.app.CarAppService
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
@@ -32,9 +32,6 @@ import kotlinx.coroutines.launch
  */
 const val MEDIA_PLAYBACK_TEMPLATE_API_LEVEL = 8
 
-/** Single tag so a whole session can be filtered with `adb logcat -s RoadwaveCar`. */
-const val CAR_LOG_TAG = "RoadwaveCar"
-
 class RoadwaveCarAppService : CarAppService() {
     @Suppress("PrivateResource") // deliberate: see the allowlist branch below
     override fun createHostValidator(): HostValidator {
@@ -56,7 +53,7 @@ class RoadwaveCarAppService : CarAppService() {
     @androidx.annotation.OptIn(UnstableApi::class)
     @OptIn(ExperimentalCarApi::class, UnstableApi::class)
     override fun onCreateSession(): Session {
-        Log.i(CAR_LOG_TAG, "onCreateSession() — CarAppService reached by a host")
+        carLogI("onCreateSession() — CarAppService reached by a host")
         return RoadwaveCarSession()
     }
 }
@@ -106,23 +103,21 @@ class RoadwaveCarSession : Session() {
 
         val actualLevel = runCatching { carContext.carAppApiLevel }.getOrDefault(-1)
 
-        Log.i(CAR_LOG_TAG, "===== Roadwave car host diagnostics =====")
-        Log.i(CAR_LOG_TAG, "host package        : ${runCatching { carContext.hostInfo?.packageName }.getOrNull()}")
-        Log.i(CAR_LOG_TAG, "host uid            : ${runCatching { carContext.hostInfo?.uid }.getOrNull()}")
-        Log.i(CAR_LOG_TAG, "carAppApiLevel      : $actualLevel")
-        Log.i(CAR_LOG_TAG, "manifest minCarApi  : $declaredMin")
-        Log.i(
-            CAR_LOG_TAG,
+        carLogI("===== Roadwave car host diagnostics =====")
+        carLogI("host package        : ${runCatching { carContext.hostInfo?.packageName }.getOrNull()}")
+        carLogI("host uid            : ${runCatching { carContext.hostInfo?.uid }.getOrNull()}")
+        carLogI("carAppApiLevel      : $actualLevel")
+        carLogI("manifest minCarApi  : $declaredMin")
+        carLogI(
             "MediaPlaybackTemplate supported: " +
                 "${actualLevel >= MEDIA_PLAYBACK_TEMPLATE_API_LEVEL} (needs >= $MEDIA_PLAYBACK_TEMPLATE_API_LEVEL)"
         )
         if (actualLevel in 0 until MEDIA_PLAYBACK_TEMPLATE_API_LEVEL) {
-            Log.w(
-                CAR_LOG_TAG,
+            carLogW(
                 "Host is below level $MEDIA_PLAYBACK_TEMPLATE_API_LEVEL — PlaybackScreen will use the ListTemplate fallback."
             )
         }
-        Log.i(CAR_LOG_TAG, "========================================")
+        carLogI("========================================")
     }
 
     /**
@@ -136,27 +131,31 @@ class RoadwaveCarSession : Session() {
      * and only then read the token.
      */
     private fun registerPlaybackToken() {
+        val start = SystemClock.elapsedRealtime()
         val existing = PlaybackService.mediaSessionToken
         if (existing != null) {
             registerToken(existing, "static field (service already running)")
             return
         }
 
-        Log.d(CAR_LOG_TAG, "Media session token not ready — binding a MediaController to start PlaybackService")
+        carLogD("Media session token not ready — binding a MediaController to start PlaybackService")
         val sessionToken = SessionToken(carContext, ComponentName(carContext, PlaybackService::class.java))
         val future = MediaController.Builder(carContext, sessionToken).buildAsync()
         tokenControllerFuture = future
         future.addListener({
+            val elapsed = SystemClock.elapsedRealtime() - start
             runCatching { future.get() }
-                .onFailure { Log.e(CAR_LOG_TAG, "Failed to connect MediaController for token registration", it) }
+                .onFailure {
+                    carLogE("Failed to connect MediaController for token registration (${elapsed}ms)", it)
+                }
                 .onSuccess {
                     val token = PlaybackService.mediaSessionToken
                     if (token != null) {
+                        carLogD("MediaController connected in ${elapsed}ms")
                         registerToken(token, "MediaController connection")
                     } else {
-                        Log.e(
-                            CAR_LOG_TAG,
-                            "PlaybackService connected but mediaSessionToken is still null — " +
+                        carLogE(
+                            "PlaybackService connected (${elapsed}ms) but mediaSessionToken is still null — " +
                                 "MediaPlaybackTemplate will show an error in the car."
                         )
                     }
@@ -170,21 +169,21 @@ class RoadwaveCarSession : Session() {
             (carContext.getCarService(CarContext.MEDIA_PLAYBACK_SERVICE) as MediaPlaybackManager)
                 .registerMediaPlaybackToken(token)
         }.onSuccess {
-            Log.i(CAR_LOG_TAG, "registerMediaPlaybackToken() succeeded via $source")
+            carLogI("registerMediaPlaybackToken() succeeded via $source")
         }.onFailure {
-            Log.e(CAR_LOG_TAG, "registerMediaPlaybackToken() failed via $source", it)
+            carLogE("registerMediaPlaybackToken() failed via $source", it)
         }
     }
 
     override fun onCreateScreen(intent: android.content.Intent): Screen {
-        Log.d(CAR_LOG_TAG, "onCreateScreen action=${intent.action}")
+        carLogD("onCreateScreen action=${intent.action}")
         val rootScreen = MainCarScreen(carContext)
         handlePlaybackIntent(intent)
         return rootScreen
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
-        Log.d(CAR_LOG_TAG, "onNewIntent action=${intent.action}")
+        carLogD("onNewIntent action=${intent.action}")
         handlePlaybackIntent(intent)
     }
 
@@ -269,8 +268,11 @@ class SongsScreen(carContext: CarContext) : Screen(carContext) {
     }
 
     private fun playMediaItem(startIndex: Int) {
+        val start = SystemClock.elapsedRealtime()
+        carLogD("SongsScreen.playMediaItem($startIndex): waiting on controller")
         controllerFuture?.addListener({
             val controller = controllerFuture?.get()
+            carLogD("SongsScreen.playMediaItem: controller ready in ${SystemClock.elapsedRealtime() - start}ms")
             val mediaItems = songs.map { song ->
                 androidx.media3.common.MediaItem.Builder()
                     .setMediaId(song.id)
@@ -365,8 +367,13 @@ class PlaylistDetailScreen(carContext: CarContext, private val playlist: com.apk
     }
 
     private fun playMediaItem(startIndex: Int) {
+        val start = SystemClock.elapsedRealtime()
+        carLogD("PlaylistDetailScreen.playMediaItem($startIndex): waiting on controller")
         controllerFuture?.addListener({
             val controller = controllerFuture?.get()
+            carLogD(
+                "PlaylistDetailScreen.playMediaItem: controller ready in ${SystemClock.elapsedRealtime() - start}ms"
+            )
             val mediaItems = playlistSongs.map { song ->
                 androidx.media3.common.MediaItem.Builder()
                     .setMediaId(song.id)
@@ -403,10 +410,7 @@ class PlaybackScreen(carContext: CarContext) : Screen(carContext) {
     private val supportsMediaPlaybackTemplate: Boolean by lazy {
         val level = runCatching { carContext.carAppApiLevel }.getOrDefault(-1)
         val supported = level >= MEDIA_PLAYBACK_TEMPLATE_API_LEVEL
-        Log.i(
-            CAR_LOG_TAG,
-            "PlaybackScreen: carAppApiLevel=$level supportsMediaPlaybackTemplate=$supported"
-        )
+        carLogI("PlaybackScreen: carAppApiLevel=$level supportsMediaPlaybackTemplate=$supported")
         supported
     }
 
@@ -431,7 +435,7 @@ class PlaybackScreen(carContext: CarContext) : Screen(carContext) {
                         })
                         invalidate()
                     }
-                    .onFailure { Log.e(CAR_LOG_TAG, "PlaybackScreen: MediaController connect failed", it) }
+                    .onFailure { carLogE("PlaybackScreen: MediaController connect failed", it) }
             }, MoreExecutors.directExecutor())
         }
 

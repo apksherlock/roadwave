@@ -1,4 +1,14 @@
 import io.gitlab.arturbosch.detekt.Detekt
+import java.util.Properties
+
+// Local-only secrets (API keys, etc.) — see secrets.properties.example.
+// The file itself is gitignored; only this loader is committed.
+val secretsProperties = Properties().apply {
+    val secretsFile = rootProject.file("secrets.properties")
+    if (secretsFile.exists()) {
+        secretsFile.inputStream().use { load(it) }
+    }
+}
 
 plugins {
     alias(libs.plugins.android.application)
@@ -19,6 +29,12 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField(
+            "String",
+            "BUGFENDER_APP_KEY",
+            "\"${secretsProperties.getProperty("bugfenderAppKey", "")}\""
+        )
     }
 
     buildTypes {
@@ -34,6 +50,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -55,6 +72,7 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.car.app)
+    implementation(libs.bugfender)
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
