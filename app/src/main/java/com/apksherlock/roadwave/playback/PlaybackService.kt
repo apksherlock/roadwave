@@ -118,6 +118,24 @@ class PlaybackService : MediaLibraryService() {
                     updateRepeatButton()
                 }
             }
+
+            // Not currently logged anywhere else — if a track fails to decode/load (a real
+            // possibility if file access behaves differently in the car's process context),
+            // this would previously fail completely silently from our own diagnostics' view.
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                carLogE("ExoPlayer error: ${error.errorCodeName}", error)
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                val stateName = when (playbackState) {
+                    Player.STATE_IDLE -> "IDLE"
+                    Player.STATE_BUFFERING -> "BUFFERING"
+                    Player.STATE_READY -> "READY"
+                    Player.STATE_ENDED -> "ENDED"
+                    else -> "UNKNOWN($playbackState)"
+                }
+                carLogD("ExoPlayer playbackState=$stateName")
+            }
         })
 
         // ExoPlayer's own seekToNext()/getAvailableCommands() treat REPEAT_MODE_ONE the
@@ -419,6 +437,9 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        // If this fires shortly after onCreate() with no user action in between, that's the
+        // process being evicted — the exact failure mode the foreground-service fix targets.
+        carLogW("PlaybackService.onDestroy()")
         serviceScope.cancel()
         mediaSession?.run {
             player.release()

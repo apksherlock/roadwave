@@ -67,6 +67,7 @@ class RoadwaveCarSession : Session() {
     init {
         lifecycle.addObserver(
             LifecycleEventObserver { _, event ->
+                carLogD("RoadwaveCarSession lifecycle event=$event")
                 when (event) {
                     Lifecycle.Event.ON_CREATE -> {
                         logHostDiagnostics()
@@ -189,40 +190,74 @@ class RoadwaveCarSession : Session() {
 
     private fun handlePlaybackIntent(intent: android.content.Intent) {
         val action = intent.action
-        if (action == "androidx.car.app.media.action.SHOW_MEDIA_PLAYBACK" ||
-            action == "android.intent.action.VIEW" ||
-            action == "android.media.action.DISPLAY_AUDIO_CONTROL"
-        ) {
+        if (isShowPlaybackAction(action)) {
+            carLogD("handlePlaybackIntent: recognized action=$action, pushing PlaybackScreen")
             val screenManager = carContext.getCarService(ScreenManager::class.java)
             if (screenManager.top !is PlaybackScreen) {
                 screenManager.push(PlaybackScreen(carContext))
             }
+        } else {
+            carLogD("handlePlaybackIntent: unrecognized action=$action, no-op")
         }
+    }
+
+    /**
+     * Real hosts have been observed sending "MEDIA_SHOW_PLAYBACK_VIEW", which matches
+     * none of the three documented action strings verbatim — falls back to a substring
+     * check on "SHOW_MEDIA_PLAYBACK"/"PLAYBACK_VIEW" so host variants like that one are
+     * still recognized instead of silently falling through.
+     */
+    private fun isShowPlaybackAction(action: String?): Boolean {
+        if (action == null) return false
+        val recognizedActions = setOf(
+            "androidx.car.app.media.action.SHOW_MEDIA_PLAYBACK",
+            "android.intent.action.VIEW",
+            "android.media.action.DISPLAY_AUDIO_CONTROL"
+        )
+        return action in recognizedActions ||
+            action.contains("SHOW_MEDIA_PLAYBACK") ||
+            action.contains("PLAYBACK_VIEW")
     }
 }
 
 class MainCarScreen(carContext: CarContext) : Screen(carContext) {
+    init {
+        lifecycle.addObserver(
+            LifecycleEventObserver { _, event -> carLogD("MainCarScreen lifecycle event=$event") }
+        )
+    }
+
     override fun onGetTemplate(): Template {
+        carLogD("MainCarScreen.onGetTemplate() called")
         val listBuilder = ItemList.Builder()
             .addItem(
                 Row.Builder()
                     .setTitle("All Songs")
                     .addText("Browse your library")
-                    .setOnClickListener { screenManager.push(SongsScreen(carContext)) }
+                    .setOnClickListener {
+                        carLogD("MainCarScreen: All Songs tapped")
+                        screenManager.push(SongsScreen(carContext))
+                    }
                     .build()
             )
             .addItem(
                 Row.Builder()
                     .setTitle("Playlists")
                     .addText("Your collections")
-                    .setOnClickListener { screenManager.push(PlaylistsScreen(carContext)) }
+                    .setOnClickListener {
+                        carLogD("MainCarScreen: Playlists tapped")
+                        screenManager.push(PlaylistsScreen(carContext))
+                    }
                     .build()
             )
             .addItem(
                 Row.Builder()
                     .setTitle("Search")
                     .addText("Find a song")
-                    .setOnClickListener { screenManager.push(SearchScreen(carContext)) }
+                    .setOnClickListener {
+                        carLogD("MainCarScreen: Search tapped")
+                        screenManager.push(SearchScreen(carContext))
+                    }
                     .build()
             )
 
@@ -241,11 +276,16 @@ class SearchScreen(carContext: CarContext) : Screen(carContext), SearchTemplate.
     private var controllerFuture: ListenableFuture<MediaController>? = null
 
     init {
+        carLogD("SearchScreen created")
+        lifecycle.addObserver(
+            LifecycleEventObserver { _, event -> carLogD("SearchScreen lifecycle event=$event") }
+        )
         val sessionToken = SessionToken(carContext, ComponentName(carContext, PlaybackService::class.java))
         controllerFuture = MediaController.Builder(carContext, sessionToken).buildAsync()
 
         scope.launch {
             allSongs = repository.getSongs()
+            carLogD("SearchScreen: loaded ${allSongs.size} song(s) to search over")
         }
     }
 
@@ -258,6 +298,7 @@ class SearchScreen(carContext: CarContext) : Screen(carContext), SearchTemplate.
                     it.artist.contains(searchText, ignoreCase = true)
             }
         }
+        carLogD("SearchScreen: query=\"$searchText\" -> ${results.size} match(es)")
         invalidate()
     }
 
@@ -280,6 +321,7 @@ class SearchScreen(carContext: CarContext) : Screen(carContext), SearchTemplate.
             }
         }
 
+        carLogD("SearchScreen: onGetTemplate() building SearchTemplate with ${results.size} result(s)")
         return SearchTemplate.Builder(this)
             .setHeaderAction(Action.BACK)
             .setSearchHint("Search songs")
@@ -289,8 +331,10 @@ class SearchScreen(carContext: CarContext) : Screen(carContext), SearchTemplate.
     }
 
     private fun playMediaItem(startIndex: Int) {
+        carLogD("SearchScreen.playMediaItem($startIndex): waiting on controller")
         controllerFuture?.addListener({
             val controller = controllerFuture?.get()
+            carLogD("SearchScreen.playMediaItem: controller ready")
             val mediaItems = results.map { song ->
                 androidx.media3.common.MediaItem.Builder()
                     .setMediaId(song.id)
@@ -310,16 +354,22 @@ class SongsScreen(carContext: CarContext) : Screen(carContext) {
     private var controllerFuture: ListenableFuture<MediaController>? = null
 
     init {
+        carLogD("SongsScreen created")
+        lifecycle.addObserver(
+            LifecycleEventObserver { _, event -> carLogD("SongsScreen lifecycle event=$event") }
+        )
         val sessionToken = SessionToken(carContext, ComponentName(carContext, PlaybackService::class.java))
         controllerFuture = MediaController.Builder(carContext, sessionToken).buildAsync()
 
         scope.launch {
             songs = repository.getSongs()
+            carLogD("SongsScreen: loaded ${songs.size} song(s), invalidating")
             invalidate()
         }
     }
 
     override fun onGetTemplate(): Template {
+        carLogD("SongsScreen.onGetTemplate() called, songs.size=${songs.size}")
         val listBuilder = ItemList.Builder()
         if (songs.isEmpty()) {
             listBuilder.addItem(Row.Builder().setTitle("No songs found").build())
@@ -368,13 +418,19 @@ class PlaylistsScreen(carContext: CarContext) : Screen(carContext) {
     private var playlists: List<com.apksherlock.roadwave.model.Playlist> = emptyList()
 
     init {
+        carLogD("PlaylistsScreen created")
+        lifecycle.addObserver(
+            LifecycleEventObserver { _, event -> carLogD("PlaylistsScreen lifecycle event=$event") }
+        )
         scope.launch {
             playlists = repository.getPlaylists()
+            carLogD("PlaylistsScreen: loaded ${playlists.size} playlist(s), invalidating")
             invalidate()
         }
     }
 
     override fun onGetTemplate(): Template {
+        carLogD("PlaylistsScreen.onGetTemplate() called, playlists.size=${playlists.size}")
         val listBuilder = ItemList.Builder()
         if (playlists.isEmpty()) {
             listBuilder.addItem(Row.Builder().setTitle("No playlists found").build())
@@ -408,17 +464,23 @@ class PlaylistDetailScreen(carContext: CarContext, private val playlist: com.apk
     private var controllerFuture: ListenableFuture<MediaController>? = null
 
     init {
+        carLogD("PlaylistDetailScreen created for playlist=${playlist.name}")
+        lifecycle.addObserver(
+            LifecycleEventObserver { _, event -> carLogD("PlaylistDetailScreen lifecycle event=$event") }
+        )
         val sessionToken = SessionToken(carContext, ComponentName(carContext, PlaybackService::class.java))
         controllerFuture = MediaController.Builder(carContext, sessionToken).buildAsync()
 
         scope.launch {
             val allSongs = repository.getSongs()
             playlistSongs = playlist.songIds.mapNotNull { id -> allSongs.find { it.id == id } }
+            carLogD("PlaylistDetailScreen: loaded ${playlistSongs.size} song(s), invalidating")
             invalidate()
         }
     }
 
     override fun onGetTemplate(): Template {
+        carLogD("PlaylistDetailScreen.onGetTemplate() called, playlistSongs.size=${playlistSongs.size}")
         val listBuilder = ItemList.Builder()
         if (playlistSongs.isEmpty()) {
             listBuilder.addItem(Row.Builder().setTitle("Playlist is empty").build())
@@ -518,6 +580,7 @@ class PlaybackScreen(carContext: CarContext) : Screen(carContext) {
 
         lifecycle.addObserver(
             LifecycleEventObserver { _, event ->
+                carLogD("PlaybackScreen lifecycle event=$event")
                 if (event == Lifecycle.Event.ON_DESTROY) {
                     controllerFuture?.let { MediaController.releaseFuture(it) }
                     controllerFuture = null
@@ -530,6 +593,7 @@ class PlaybackScreen(carContext: CarContext) : Screen(carContext) {
     @androidx.annotation.OptIn(ExperimentalCarApi::class)
     @OptIn(ExperimentalCarApi::class)
     override fun onGetTemplate(): Template {
+        carLogD("PlaybackScreen.onGetTemplate() called, supportsMediaPlaybackTemplate=$supportsMediaPlaybackTemplate")
         return if (supportsMediaPlaybackTemplate) {
             // No setStartHeaderAction(Action.BACK) here: the host already renders its
             // own back affordance for MediaPlaybackTemplate's "Now Playing" chrome.
