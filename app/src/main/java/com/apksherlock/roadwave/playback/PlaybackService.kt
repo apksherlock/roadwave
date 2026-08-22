@@ -33,6 +33,7 @@ import com.apksherlock.roadwave.data.SongRepository
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
 import kotlinx.coroutines.*
 import java.io.File
 
@@ -63,6 +64,9 @@ class PlaybackService : MediaLibraryService() {
      * background trigger. If that happens here, the service simply continues without
      * the extra protection rather than crashing onCreate().
      */
+    // Intentionally broad: see the catch below — the point is to survive and name any
+    // refusal, not to enumerate a set that has changed with every platform release.
+    @Suppress("TooGenericExceptionCaught")
     private fun promoteToForegroundImmediately() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -80,6 +84,12 @@ class PlaybackService : MediaLibraryService() {
             .setOngoing(true)
             .build()
 
+        // Catching Exception rather than IllegalStateException alone: the background-start
+        // restrictions have grown a family of refusals across releases and not all of them
+        // are ISE subclasses (Android 14+ can raise SecurityException for a foreground
+        // service type it considers unjustified). Any of them is survivable here — the
+        // service just runs without the extra protection — but losing which one fired
+        // costs another drive, so the exception class is logged explicitly.
         try {
             ServiceCompat.startForeground(
                 this,
@@ -87,10 +97,26 @@ class PlaybackService : MediaLibraryService() {
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
             )
-            carLogD("PlaybackService promoted to foreground in onCreate()")
-        } catch (e: IllegalStateException) {
-            carLogE("startForeground() was not allowed at this time", e)
+            carLogI("PlaybackService promoted to foreground in onCreate()")
+        } catch (e: Exception) {
+            carLogE("startForeground() refused (${e.javaClass.name}) — service continues unprotected", e)
+            carLogFlush("foreground promotion refused")
         }
+    }
+
+    /**
+     * Every media browser and every MediaController connection lands here first, so this
+     * distinguishes "Android Auto never asked for the library" from "it asked and we
+     * answered wrongly" — indistinguishable from the car's error screen alone.
+     */
+    override fun onBind(intent: Intent?): android.os.IBinder? {
+        carLogI("PlaybackService.onBind ${describeIntent(intent)}")
+        return super.onBind(intent)
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        carLogW("PlaybackService.onUnbind ${describeIntent(intent)}")
+        return super.onUnbind(intent)
     }
 
     @androidx.annotation.OptIn(UnstableApi::class)
@@ -188,9 +214,29 @@ class PlaybackService : MediaLibraryService() {
             .setSessionActivity(pendingIntent)
             .build()
 
+        // getSessionCompatToken() is deprecated in favour of getPlatformToken(), but the
+        // replacement is not equivalent here. MediaPlaybackManager.registerMediaPlaybackToken()
+        // takes a MediaSessionCompat.Token, and rebuilding one from the platform token
+        // (MediaSessionCompat.Token.fromToken(getPlatformToken())) drops the extra binder that
+        // the compat token carries for legacy controllers — media3 derives the platform token by
+        // unwrapping the compat one, so the round trip is lossy. Android Auto's media surface is
+        // exactly the legacy consumer that binder serves, so the deprecated call is the correct
+        // one until the car-app library accepts a platform token.
+        @Suppress("DEPRECATION")
         mediaSessionToken = mediaSession?.getSessionCompatToken()
         updateRepeatButton()
-        carLogD("PlaybackService.onCreate() done in ${SystemClock.elapsedRealtime() - start}ms")
+        carLogI(
+            "PlaybackService.onCreate() done in ${SystemClock.elapsedRealtime() - start}ms, " +
+                "sessionToken=${if (mediaSessionToken != null) "ready" else "NULL"}"
+        )
+        // An empty library renders as "No songs found" in the car, which looks identical
+        // to a load failure from the driver's seat. Record the count once so the two can
+        // be told apart without guessing.
+        serviceScope.launch {
+            runCatching { repository.getSongs().size to repository.getPlaylists().size }
+                .onSuccess { (songs, playlists) -> carLogI("Library: $songs song(s), $playlists playlist(s)") }
+                .onFailure { carLogE("Library probe failed", it) }
+        }
     }
 
     @androidx.annotation.OptIn(UnstableApi::class)
@@ -224,6 +270,10 @@ class PlaybackService : MediaLibraryService() {
             session: MediaSession,
             controller: MediaSession.ControllerInfo
         ): MediaSession.ConnectionResult {
+            carLogI(
+                "onConnect from package=${controller.packageName} uid=${controller.uid} " +
+                    "controllerVersion=${controller.controllerVersion}"
+            )
             val sessionCommands =
                 MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS
                     .buildUpon()
@@ -271,6 +321,7 @@ class PlaybackService : MediaLibraryService() {
             browser: MediaSession.ControllerInfo,
             params: LibraryParams?
         ): ListenableFuture<LibraryResult<MediaItem>> {
+            carLogI("onGetLibraryRoot from package=${browser.packageName} params=${params?.extras?.keySet()}")
             val rootItem = MediaItem.Builder()
                 .setMediaId("root")
                 .setMediaMetadata(
@@ -291,7 +342,7 @@ class PlaybackService : MediaLibraryService() {
         ): ListenableFuture<MutableList<MediaItem>> {
             val start = SystemClock.elapsedRealtime()
             carLogD("onAddMediaItems: resolving ${mediaItems.size} item(s)")
-            val future = SettableFuture<MutableList<MediaItem>>()
+            val future = SettableFuture.create<MutableList<MediaItem>>()
             serviceScope.launch {
                 // One getSongs() call for the whole batch, not one per item — the previous
                 // per-item runBlocking() call synchronously stalled the session callback
@@ -335,7 +386,7 @@ class PlaybackService : MediaLibraryService() {
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
             val start = SystemClock.elapsedRealtime()
             carLogD("onGetChildren: parentId=$parentId")
-            val future = SettableFuture<LibraryResult<ImmutableList<MediaItem>>>()
+            val future = SettableFuture.create<LibraryResult<ImmutableList<MediaItem>>>()
             serviceScope.launch {
                 val mediaItems = when (parentId) {
                     "root" -> {
@@ -447,26 +498,5 @@ class PlaybackService : MediaLibraryService() {
             mediaSession = null
         }
         super.onDestroy()
-    }
-
-    // Helper class since we don't have Guava's SettableFuture easily available without extra deps
-    private class SettableFuture<V> : ListenableFuture<V> {
-        private val deferred = CompletableDeferred<V>()
-
-        fun set(value: V) {
-            deferred.complete(value)
-        }
-
-        override fun addListener(listener: Runnable, executor: java.util.concurrent.Executor) {
-            deferred.invokeOnCompletion { executor.execute(listener) }
-        }
-
-        override fun cancel(mayInterruptIfRunning: Boolean): Boolean = deferred.completeExceptionally(
-            java.util.concurrent.CancellationException()
-        )
-        override fun isCancelled(): Boolean = deferred.isCancelled
-        override fun isDone(): Boolean = deferred.isCompleted
-        override fun get(): V = runBlocking { deferred.await() }
-        override fun get(timeout: Long, unit: java.util.concurrent.TimeUnit): V = runBlocking { deferred.await() }
     }
 }

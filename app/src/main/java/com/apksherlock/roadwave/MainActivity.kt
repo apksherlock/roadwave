@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.LibraryMusic
 import androidx.compose.material3.*
@@ -266,7 +267,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     Icon(
                         when (selectedTab) {
                             0 -> Icons.Default.Add
-                            1 -> Icons.Default.PlaylistAdd
+                            1 -> Icons.AutoMirrored.Filled.PlaylistAdd
                             else -> Icons.Default.LibraryAdd
                         },
                         contentDescription = null

@@ -1,6 +1,8 @@
 package com.apksherlock.roadwave.playback
 
 import android.content.ComponentName
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.support.v4.media.session.MediaSessionCompat
 import androidx.car.app.CarAppService
@@ -32,7 +34,39 @@ import kotlinx.coroutines.launch
  */
 const val MEDIA_PLAYBACK_TEMPLATE_API_LEVEL = 8
 
+/**
+ * Minimum Car App API level for [androidx.car.app.model.ListTemplate.Builder.setHeader],
+ * which every list screen in this file uses. Only used for diagnostics — the annotation
+ * is not enforced at runtime, so a lower host silently receives a template it cannot
+ * render.
+ */
+const val LIST_TEMPLATE_HEADER_API_LEVEL = 7
+
+/**
+ * How long we wait for the token-registration [MediaController] to connect before
+ * logging a warning. Not a real timeout (there's no way to cancel and recover — the
+ * host owns the retry/give-up decision), just an early warning that we're on the path
+ * to the host's own "not responding" screen.
+ */
+private const val TOKEN_WATCHDOG_TIMEOUT_MS = 5000L
+
 class RoadwaveCarAppService : CarAppService() {
+    override fun onCreate() {
+        super.onCreate()
+        // The earliest possible evidence that a host bound us at all. If a failing drive
+        // produces no line at this level, the problem is upstream of the app entirely
+        // (app not listed, host rejected the manifest, unknown-sources gating) and no
+        // amount of instrumentation further in will show anything.
+        carLogI("RoadwaveCarAppService.onCreate() — bound by a host")
+        carLogFlush("car app service created")
+    }
+
+    override fun onDestroy() {
+        carLogW("RoadwaveCarAppService.onDestroy()")
+        carLogFlush("car app service destroyed")
+        super.onDestroy()
+    }
+
     @Suppress("PrivateResource") // deliberate: see the allowlist branch below
     override fun createHostValidator(): HostValidator {
         // ALLOW_ALL_HOSTS_VALIDATOR only satisfies a real host's binding check when the
@@ -41,19 +75,34 @@ class RoadwaveCarAppService : CarAppService() {
         // the car-app library's bundled allowlist (signatures for Google's official hosts:
         // the Android Auto phone app, Android Automotive, and the Desktop Head Unit) for
         // release builds instead, and keep ALLOW_ALL only for debug convenience.
-        return if ((applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+        val debuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        val validator = if (debuggable) {
             HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
         } else {
             HostValidator.Builder(applicationContext)
                 .addAllowedHosts(androidx.car.app.R.array.hosts_allowlist_sample)
                 .build()
         }
+        // A rejected host never reaches onCreateSession(), so pairing this line with the
+        // absence of the next one is how a validation failure is identified after the
+        // fact. The allowed set is logged so a host package missing from it is visible
+        // without having to decompile the library's allowlist resource.
+        carLogI(
+            "createHostValidator() debuggable=$debuggable allowAll=$debuggable " +
+                "allowedHosts=${runCatching { validator.allowedHosts.keys }.getOrNull()}"
+        )
+        return validator
     }
 
     @androidx.annotation.OptIn(UnstableApi::class)
     @OptIn(ExperimentalCarApi::class, UnstableApi::class)
     override fun onCreateSession(): Session {
-        carLogI("onCreateSession() — CarAppService reached by a host")
+        // Reaching here means host validation passed and the handshake settled.
+        carLogI("onCreateSession() — host validation passed, host=${runCatching { hostInfo }.getOrNull()}")
+        // Ship immediately instead of waiting for Bugfender's normal upload cadence,
+        // since if everything after this hangs, the user gives up and unplugs before a
+        // natural flush would happen.
+        carLogFlush("session created")
         return RoadwaveCarSession()
     }
 }
@@ -67,21 +116,40 @@ class RoadwaveCarSession : Session() {
     init {
         lifecycle.addObserver(
             LifecycleEventObserver { _, event ->
-                carLogD("RoadwaveCarSession lifecycle event=$event")
+                // Stack depth alongside the event: a session that reaches ON_START with
+                // an empty stack has failed to deliver a root screen, which is the shape
+                // of the "app isn't working" failure rather than a plain teardown.
+                carLogD("RoadwaveCarSession lifecycle event=$event screenStack=${screenStackDescription()}")
                 when (event) {
                     Lifecycle.Event.ON_CREATE -> {
                         logHostDiagnostics()
                         registerPlaybackToken()
                     }
+                    Lifecycle.Event.ON_RESUME -> carLogFlush("session resumed")
                     Lifecycle.Event.ON_DESTROY -> {
                         tokenControllerFuture?.let { MediaController.releaseFuture(it) }
                         tokenControllerFuture = null
+                        carLogFlush("session destroyed")
                     }
                     else -> Unit
                 }
             }
         )
     }
+
+    override fun onCarConfigurationChanged(newConfiguration: android.content.res.Configuration) {
+        carLogD("onCarConfigurationChanged: $newConfiguration")
+    }
+
+    /**
+     * Top-first listing of the screen stack. Uses [ScreenManager.getScreenStack] rather
+     * than [ScreenManager.getTop], which throws while the stack is empty — the very
+     * failure this instrumentation exists to catch.
+     */
+    private fun screenStackDescription(): String = runCatching {
+        val stack = carContext.getCarService(ScreenManager::class.java).screenStack
+        if (stack.isEmpty()) "[empty]" else stack.joinToString(",") { it.javaClass.simpleName }
+    }.getOrElse { "<unavailable: $it>" }
 
     /**
      * Dumps everything needed to tell whether the host is the culprit. Compare
@@ -107,8 +175,10 @@ class RoadwaveCarSession : Session() {
         carLogI("===== Roadwave car host diagnostics =====")
         carLogI("host package        : ${runCatching { carContext.hostInfo?.packageName }.getOrNull()}")
         carLogI("host uid            : ${runCatching { carContext.hostInfo?.uid }.getOrNull()}")
+        carLogI("host version        : ${hostVersionName()}")
         carLogI("carAppApiLevel      : $actualLevel")
         carLogI("manifest minCarApi  : $declaredMin")
+        carLogI("dark mode           : ${runCatching { carContext.isDarkMode }.getOrNull()}")
         carLogI(
             "MediaPlaybackTemplate supported: " +
                 "${actualLevel >= MEDIA_PLAYBACK_TEMPLATE_API_LEVEL} (needs >= $MEDIA_PLAYBACK_TEMPLATE_API_LEVEL)"
@@ -118,8 +188,30 @@ class RoadwaveCarSession : Session() {
                 "Host is below level $MEDIA_PLAYBACK_TEMPLATE_API_LEVEL — PlaybackScreen will use the ListTemplate fallback."
             )
         }
+        // Every list screen calls ListTemplate.Builder.setHeader(), which the car-app
+        // library annotates @RequiresCarApi(7). That annotation is lint-only — nothing
+        // enforces it at runtime — so on a lower host the template goes out anyway and
+        // is rejected on arrival, with no client-side exception to attribute it to.
+        // Declaring minCarApiLevel=5 in the manifest means we can legitimately be
+        // negotiated down that far, so flag it loudly rather than leave it silent.
+        if (actualLevel in 0 until LIST_TEMPLATE_HEADER_API_LEVEL) {
+            carLogW(
+                "Host level $actualLevel is below $LIST_TEMPLATE_HEADER_API_LEVEL — " +
+                    "ListTemplate.setHeader() is @RequiresCarApi($LIST_TEMPLATE_HEADER_API_LEVEL) and every list " +
+                    "screen uses it. Expect the host to reject these templates; switch them to " +
+                    "setTitle()/setHeaderAction() or raise minCarApiLevel."
+            )
+        }
         carLogI("========================================")
+        carLogFlush("host diagnostics captured")
     }
+
+    /** Host app version, to tell an old Android Auto build apart from an old head unit. */
+    private fun hostVersionName(): String = runCatching {
+        val pkg = carContext.hostInfo?.packageName ?: return "<no host info>"
+        @Suppress("DEPRECATION")
+        carContext.packageManager.getPackageInfo(pkg, 0).versionName ?: "<none>"
+    }.getOrElse { "<unavailable: $it>" }
 
     /**
      * Registers the media session token with the host.
@@ -143,11 +235,30 @@ class RoadwaveCarSession : Session() {
         val sessionToken = SessionToken(carContext, ComponentName(carContext, PlaybackService::class.java))
         val future = MediaController.Builder(carContext, sessionToken).buildAsync()
         tokenControllerFuture = future
+
+        // registerMediaPlaybackToken() feeds both the host's native now-playing widget
+        // and our own PlaybackScreen — if this future never completes on a given head
+        // unit, both surfaces stall with no visible error, which is exactly the failure
+        // mode under investigation. Nothing upstream of this (host, binder) can time out
+        // on our behalf, so we watch for it ourselves and flush a breadcrumb the moment
+        // we notice, rather than waiting on Bugfender's normal upload cadence.
+        val watchdog = Handler(Looper.getMainLooper())
+        val watchdogRunnable = Runnable {
+            carLogW(
+                "MediaController for token registration still not connected after " +
+                    "${SystemClock.elapsedRealtime() - start}ms — host may already be timing out"
+            )
+            carLogFlush("token controller watchdog fired")
+        }
+        watchdog.postDelayed(watchdogRunnable, TOKEN_WATCHDOG_TIMEOUT_MS)
+
         future.addListener({
+            watchdog.removeCallbacks(watchdogRunnable)
             val elapsed = SystemClock.elapsedRealtime() - start
             runCatching { future.get() }
                 .onFailure {
                     carLogE("Failed to connect MediaController for token registration (${elapsed}ms)", it)
+                    carLogFlush("token controller connect failed")
                 }
                 .onSuccess {
                     val token = PlaybackService.mediaSessionToken
@@ -159,6 +270,7 @@ class RoadwaveCarSession : Session() {
                             "PlaybackService connected (${elapsed}ms) but mediaSessionToken is still null — " +
                                 "MediaPlaybackTemplate will show an error in the car."
                         )
+                        carLogFlush("session token still null")
                     }
                 }
         }, MoreExecutors.directExecutor())
@@ -176,28 +288,79 @@ class RoadwaveCarSession : Session() {
         }
     }
 
+    /**
+     * Builds the initial screen stack.
+     *
+     * The screen stack is still **empty** while this runs — the host pushes whatever we
+     * return only after we return it. That makes [ScreenManager.getTop] unusable here:
+     * it is documented to throw [NullPointerException] "if the method is called before a
+     * Screen has been pushed to the stack (…) or returning a Screen from
+     * Session#onCreateScreen", and it does exactly that (`requireNonNull(stack.peek())`).
+     *
+     * That NPE used to escape this method on every launch that carried a playback deep
+     * link. It propagates out of the host's `onAppCreate` dispatch, which reports the
+     * failure to the host and rethrows on the main thread — so no template is ever
+     * delivered and the car sits on a spinner until the host gives up with "Roadwave
+     * doesn't seem to be working right now". The Desktop Head Unit never reproduced it
+     * because its template launcher starts the app with a plain intent, so the deep-link
+     * branch was skipped; a real head unit's media launcher sends
+     * SHOW_MEDIA_PLAYBACK/MEDIA_SHOW_PLAYBACK_VIEW and always took it.
+     *
+     * So the deep link is handled by *composing the stack in order* instead of querying
+     * it: push the screen that belongs underneath, and return the one that belongs on top.
+     * That also puts the two screens the right way round — the old code pushed
+     * PlaybackScreen first, so the returned MainCarScreen landed on top of it and the
+     * deep link had no visible effect anyway.
+     */
     override fun onCreateScreen(intent: android.content.Intent): Screen {
-        carLogD("onCreateScreen action=${intent.action}")
-        val rootScreen = MainCarScreen(carContext)
-        handlePlaybackIntent(intent)
-        return rootScreen
+        carLogD("onCreateScreen ${describeIntent(intent)}")
+        carLogD("onCreateScreen: stack before returning root = ${screenStackDescription()}")
+        val wantsPlayback = runCatching { isShowPlaybackAction(intent.action) }
+            .onFailure { carLogE("onCreateScreen: failed to classify intent action", it) }
+            .getOrDefault(false)
+
+        if (!wantsPlayback) {
+            carLogD("onCreateScreen: no playback deep link, starting at MainCarScreen")
+            return MainCarScreen(carContext)
+        }
+
+        // Deliberately defensive: this branch only ever runs on a real head unit, so a
+        // mistake here costs another drive to find. Falling back to the browse root is
+        // always better than letting the host tear the session down.
+        return runCatching {
+            carContext.getCarService(ScreenManager::class.java).push(MainCarScreen(carContext))
+            carLogD("onCreateScreen: playback deep link, stack seeded with MainCarScreen")
+            PlaybackScreen(carContext) as Screen
+        }.getOrElse {
+            carLogE("onCreateScreen: failed to seed playback stack, falling back to MainCarScreen", it)
+            carLogFlush("playback deep link failed")
+            MainCarScreen(carContext)
+        }
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
-        carLogD("onNewIntent action=${intent.action}")
+        carLogD("onNewIntent ${describeIntent(intent)}")
         handlePlaybackIntent(intent)
     }
 
+    /**
+     * Deep-link handling for an *already running* session, where the stack is non-empty.
+     *
+     * Reads the top of the stack through [ScreenManager.getScreenStack] (a copy, empty
+     * when the stack is) rather than [ScreenManager.getTop] (throws when the stack is
+     * empty) so this stays safe if it is ever called earlier in the lifecycle again.
+     */
     private fun handlePlaybackIntent(intent: android.content.Intent) {
         val action = intent.action
-        if (isShowPlaybackAction(action)) {
-            carLogD("handlePlaybackIntent: recognized action=$action, pushing PlaybackScreen")
-            val screenManager = carContext.getCarService(ScreenManager::class.java)
-            if (screenManager.top !is PlaybackScreen) {
-                screenManager.push(PlaybackScreen(carContext))
-            }
-        } else {
+        if (!isShowPlaybackAction(action)) {
             carLogD("handlePlaybackIntent: unrecognized action=$action, no-op")
+            return
+        }
+        val screenManager = carContext.getCarService(ScreenManager::class.java)
+        val top = screenManager.screenStack.firstOrNull()
+        carLogD("handlePlaybackIntent: recognized action=$action, top=${top?.javaClass?.simpleName}")
+        if (top !is PlaybackScreen) {
+            screenManager.push(PlaybackScreen(carContext))
         }
     }
 
@@ -220,6 +383,31 @@ class RoadwaveCarSession : Session() {
     }
 }
 
+/**
+ * Wraps a screen's template construction with timing and outcome logging.
+ *
+ * A throwable escaping `onGetTemplate()` reaches the host as a failed dispatch and
+ * produces the same "isn't working right now" screen as a session that never delivers
+ * a template at all, so without this the two are indistinguishable after the fact. The
+ * duration matters too: the host applies its own deadline, and a template that takes
+ * seconds to build is a finding even when it eventually succeeds.
+ */
+private inline fun traceTemplate(screen: String, build: () -> Template): Template {
+    val start = SystemClock.elapsedRealtime()
+    return runCatching(build)
+        .onSuccess {
+            carLogD(
+                "$screen.onGetTemplate() -> ${it.javaClass.simpleName} in " +
+                    "${SystemClock.elapsedRealtime() - start}ms"
+            )
+        }
+        .onFailure {
+            carLogE("$screen.onGetTemplate() threw after ${SystemClock.elapsedRealtime() - start}ms", it)
+            carLogFlush("template build failed in $screen")
+        }
+        .getOrThrow()
+}
+
 class MainCarScreen(carContext: CarContext) : Screen(carContext) {
     init {
         lifecycle.addObserver(
@@ -227,7 +415,9 @@ class MainCarScreen(carContext: CarContext) : Screen(carContext) {
         )
     }
 
-    override fun onGetTemplate(): Template {
+    override fun onGetTemplate(): Template = traceTemplate("MainCarScreen") { buildTemplate() }
+
+    private fun buildTemplate(): Template {
         carLogD("MainCarScreen.onGetTemplate() called")
         val listBuilder = ItemList.Builder()
             .addItem(
@@ -302,7 +492,9 @@ class SearchScreen(carContext: CarContext) : Screen(carContext), SearchTemplate.
         invalidate()
     }
 
-    override fun onGetTemplate(): Template {
+    override fun onGetTemplate(): Template = traceTemplate("SearchScreen") { buildTemplate() }
+
+    private fun buildTemplate(): Template {
         val listBuilder = ItemList.Builder()
         if (results.isEmpty()) {
             listBuilder.addItem(Row.Builder().setTitle("No matches").build())
@@ -368,7 +560,9 @@ class SongsScreen(carContext: CarContext) : Screen(carContext) {
         }
     }
 
-    override fun onGetTemplate(): Template {
+    override fun onGetTemplate(): Template = traceTemplate("SongsScreen") { buildTemplate() }
+
+    private fun buildTemplate(): Template {
         carLogD("SongsScreen.onGetTemplate() called, songs.size=${songs.size}")
         val listBuilder = ItemList.Builder()
         if (songs.isEmpty()) {
@@ -429,7 +623,9 @@ class PlaylistsScreen(carContext: CarContext) : Screen(carContext) {
         }
     }
 
-    override fun onGetTemplate(): Template {
+    override fun onGetTemplate(): Template = traceTemplate("PlaylistsScreen") { buildTemplate() }
+
+    private fun buildTemplate(): Template {
         carLogD("PlaylistsScreen.onGetTemplate() called, playlists.size=${playlists.size}")
         val listBuilder = ItemList.Builder()
         if (playlists.isEmpty()) {
@@ -479,7 +675,9 @@ class PlaylistDetailScreen(carContext: CarContext, private val playlist: com.apk
         }
     }
 
-    override fun onGetTemplate(): Template {
+    override fun onGetTemplate(): Template = traceTemplate("PlaylistDetailScreen") { buildTemplate() }
+
+    private fun buildTemplate(): Template {
         carLogD("PlaylistDetailScreen.onGetTemplate() called, playlistSongs.size=${playlistSongs.size}")
         val listBuilder = ItemList.Builder()
         if (playlistSongs.isEmpty()) {
@@ -590,9 +788,11 @@ class PlaybackScreen(carContext: CarContext) : Screen(carContext) {
         )
     }
 
+    override fun onGetTemplate(): Template = traceTemplate("PlaybackScreen") { buildTemplate() }
+
     @androidx.annotation.OptIn(ExperimentalCarApi::class)
     @OptIn(ExperimentalCarApi::class)
-    override fun onGetTemplate(): Template {
+    private fun buildTemplate(): Template {
         carLogD("PlaybackScreen.onGetTemplate() called, supportsMediaPlaybackTemplate=$supportsMediaPlaybackTemplate")
         return if (supportsMediaPlaybackTemplate) {
             // No setStartHeaderAction(Action.BACK) here: the host already renders its
@@ -638,27 +838,40 @@ class PlaybackScreen(carContext: CarContext) : Screen(carContext) {
             )
         }
 
-        val actionStrip = ActionStrip.Builder()
-            .addAction(
-                Action.Builder()
-                    .setTitle("Prev")
-                    .setOnClickListener {
-                        controller?.seekToPreviousMediaItem()
-                        invalidate()
-                    }
-                    .build()
-            )
-            .addAction(
-                Action.Builder()
-                    .setTitle(if (player?.isPlaying == true) "Pause" else "Play")
+        // Transport controls are rows, not an ActionStrip.
+        //
+        // ListTemplate validates any action strip against ACTIONS_CONSTRAINTS_SIMPLE,
+        // which allows maxActions=2 and maxCustomTitles=1. The three title-only actions
+        // this screen wants (Prev / Play-Pause / Next) breach both limits, so
+        // setActionStrip() threw IllegalArgumentException on the *second* action every
+        // single time it ran — meaning onGetTemplate() always threw on this path and the
+        // host showed its "isn't working right now" screen. Icons instead of titles would
+        // still breach maxActions.
+        //
+        // Rows carry no such constraint, render on every Car App API level, and are the
+        // easier touch target in a car anyway. This also drops the deprecated
+        // setActionStrip() call.
+        if (player != null) {
+            listBuilder.addItem(
+                Row.Builder()
+                    .setTitle(if (player.isPlaying) "Pause" else "Play")
                     .setOnClickListener {
                         controller?.let { c -> if (c.isPlaying) c.pause() else c.play() }
                         invalidate()
                     }
                     .build()
             )
-            .addAction(
-                Action.Builder()
+            listBuilder.addItem(
+                Row.Builder()
+                    .setTitle("Previous")
+                    .setOnClickListener {
+                        controller?.seekToPreviousMediaItem()
+                        invalidate()
+                    }
+                    .build()
+            )
+            listBuilder.addItem(
+                Row.Builder()
                     .setTitle("Next")
                     .setOnClickListener {
                         controller?.seekToNextMediaItem()
@@ -666,7 +879,7 @@ class PlaybackScreen(carContext: CarContext) : Screen(carContext) {
                     }
                     .build()
             )
-            .build()
+        }
 
         return ListTemplate.Builder()
             .setSingleList(listBuilder.build())
@@ -676,7 +889,6 @@ class PlaybackScreen(carContext: CarContext) : Screen(carContext) {
                     .setStartHeaderAction(Action.BACK)
                     .build()
             )
-            .setActionStrip(actionStrip)
             .build()
     }
 }

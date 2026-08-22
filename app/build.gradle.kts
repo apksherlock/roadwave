@@ -35,6 +35,11 @@ android {
             "BUGFENDER_APP_KEY",
             "\"${secretsProperties.getProperty("bugfenderAppKey", "")}\""
         )
+
+        // Stamped fresh on every build so Bugfender sessions can confirm which build
+        // was actually installed when a report was captured — versionCode/versionName
+        // don't change often enough to answer that on their own.
+        buildConfigField("String", "BUILD_TIME", "\"${System.currentTimeMillis()}\"")
     }
 
     buildTypes {
@@ -79,6 +84,7 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.car.app.testing)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 

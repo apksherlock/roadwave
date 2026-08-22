@@ -66,11 +66,37 @@
             android:resource="@drawable/ic_attribution" />
 
         <!--
-          MediaPlaybackTemplate strictly requires Car App API level 8. We declare 5
-          here so the app stays eligible on hosts that negotiate a lower level, and
-          PlaybackScreen falls back to a ListTemplate at runtime when
-          carContext.carAppApiLevel < 8. Raise back to 8 if you decide the fallback
-          experience isn't acceptable.
+          REQUIRED — do not delete. The car-app AAR supplies no default, and
+          AppInfo.retrieveMinCarAppApiLevel() throws IllegalArgumentException when the key
+          is absent. That surfaces as a failure response to getAppInfo(), the first call
+          of the host handshake, so the app never loads in a car while continuing to work
+          perfectly on the phone. (The javadoc on AppInfo.MIN_API_LEVEL_METADATA_KEY
+          claims it defaults to CarAppApiLevels.getLatest() when unset; the implementation
+          does not agree.)
+
+          Compatibility FLOOR, not a feature switch. It does not select which templates
+          this app may use and it does not cap what the host reports.
+
+          AppInfo.create() reads this value as the app's minimum; the maximum is always
+          CarAppApiLevels.getLatest() (8, from car-app-api.level in car-app 1.7.0), so the
+          legal range here is 1-8. During the handshake, CarAppBinder rejects the host if
+          hostApiLevel < this value (or > our max), and CarContext.getCarAppApiLevel()
+          then returns the HOST's level, unclamped. So lowering this number only widens
+          the set of hosts that will run us — it never changes what we are allowed to send.
+
+          What it therefore is, is a promise: "this app renders correctly on a host at
+          this level". Honour it by runtime-gating anything newer, which PlaybackScreen
+          does for MediaPlaybackTemplate (@RequiresCarApi(8)) via carAppApiLevel.
+
+          The list screens call ListTemplate.Builder.setHeader(), annotated
+          @RequiresCarApi(7), and nothing enforces that annotation at runtime. It
+          degrades rather than breaks — setHeader() also populates the legacy mTitle /
+          mHeaderAction / mActionStrip fields, so an older host still renders the title
+          and back action — but it is the reason this value cannot simply be lowered
+          further. Raising it to 7 would be the strictly honest choice and costs nothing
+          on any current Android Auto host; it is left at 5 until logHostDiagnostics()
+          reports what this car actually negotiates, since raising a floor above the
+          host's level makes the app vanish from the car entirely.
         -->
         <meta-data
             android:name="androidx.car.app.minCarApiLevel"

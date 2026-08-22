@@ -39,6 +39,7 @@ androidx-media3-exoplayer = { group = "androidx.media3", name = "media3-exoplaye
 androidx-media3-session = { group = "androidx.media3", name = "media3-session", version.ref = "media3" }
 androidx-media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
 androidx-car-app = { group = "androidx.car.app", name = "app", version.ref = "carApp" }
+androidx-car-app-testing = { group = "androidx.car.app", name = "app-testing", version.ref = "carApp" }
 androidx-media = { group = "androidx.media", name = "media", version.ref = "media" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 compose-detekt-rules = { group = "io.nlopez.compose.rules", name = "detekt", version.ref = "composeDetektRules" }
